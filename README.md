@@ -19,11 +19,11 @@ still has is written down in this README instead of discovered by you later.
 
 | Skill | What it gives you | Status |
 |:--|:--|:--|
-| [**`redline`**](#-redline) | Review anything Claude writes inline, like a local PR review | 🚧 in development |
+| [**`review`**](#-review) | Review anything Claude writes inline, like a local PR review | ✅ working |
 
 ---
 
-## 🖍️ redline
+## 🖍️ review
 
 > Claude writes a document. You mark it up by selecting text — verdict, comment,
 > exact replacement. Claude reads every comment back, replies to each one, and
@@ -47,11 +47,23 @@ still has is written down in this README instead of discovered by you later.
                                              └──────────────────────────┘
 ```
 
+### Open a doc you already have
+
+```
+> /review docs/design.md
+```
+
+That's the whole flow. The Markdown renders, every heading, paragraph, list item,
+table row and code fence becomes commentable, and **your `.md` is never touched** —
+block ids live in a registry beside it, so the file still diffs cleanly in git.
+
+Insert a section at the top later and every existing comment stays where it was.
+
 ### Why it exists
 
 Reviewing a long document in chat is imprecise and lossy. You describe a location,
 Claude guesses which one you meant, and your intent arrives as prose to be
-interpreted rather than applied. `redline` makes the location exact and the fix
+interpreted rather than applied. `review` makes the location exact and the fix
 literal.
 
 ### What makes it accurate
@@ -68,6 +80,59 @@ literal.
 - **Every comment gets an answer.** A reply and a status on each one — `addressed`,
   or `pushed-back` with a reason. Disagreement is recorded, never quiet
   non-compliance.
+
+### Follow-ups, when it isn't actually fixed
+
+Claude replies to a comment and marks it addressed. If you disagree, **Not fixed —
+follow up** appends to that same comment and reopens it. It keeps its id, its anchor
+and its verdict, so an argument that runs three rounds stays on one thread instead of
+fragmenting into unrelated comments.
+
+```
+7  MUST-FIX                      Reopened
+┃ "capped at 30s"
+  retries forever on a 401
+  CLAUDE  capped it at 3 attempts
+  FOLLOW-UP  still spins when the token is stale
+```
+
+The whole exchange stays on the record — including the parts where Claude pushed back
+and turned out to be wrong.
+
+### Change summaries show the change
+
+Ask for a summary of some work and you get a curated document, not a dump — with the
+diffs inline, and **only the changed words marked**, so a one-word edit reads as one
+word instead of two near-identical lines to compare by eye:
+
+```
+templates/shell.html
+ ─ 33 │ grid-template-rows:auto minmax(0,1fr)
+ + 33 │ grid-template-rows:auto ▏auto▕ minmax(0,1fr)
+                                 ‾‾‾‾ only the insertion is marked
+
+lib/assemble.mjs
+ ─ 10 │ .replace(/<\/(script|style)/gi, '<\/$1');
+ + 10 │ .replace(
+ + 11 │   /<(\\*)\/(script|style)/gi,
+ + 12 │   (whole, slashes, tag) => `<${slashes}\/${tag}`
+ + 13 │ );
+```
+
+Code fences and diffs are syntax highlighted. Zero dependencies — js/ts, json and css
+are tokenised, anything else falls back to plain text rather than guessing badly.
+
+### What a review page is *not*
+
+A review page is written **for you**, not generated at you. It leads with the calls
+that were made without asking and the claims that aren't proved; it leaves out what
+you already agreed to. For a changelist that means only the hunks carrying a decision
+or a risk, with the rest covered in a sentence and a count.
+
+Rendering a whole diff is not a review — you already have `git diff`, and it didn't
+need a skill. Thirty blocks you work through in two minutes beat four thousand rows
+you abandon. That rule is in `SKILL.md`, so it survives past the session that learned
+it.
 
 ### Verdicts
 
@@ -97,7 +162,7 @@ literal.
 
 ### Local first
 
-`redline` runs on `127.0.0.1` by default and the document never leaves your machine.
+`review` runs on `127.0.0.1` by default and the document never leaves your machine.
 A tiny zero-dependency server holds `review.json` on disk, so submitting is a POST,
 refresh and reopen just work, there is no size ceiling, and nothing is uploaded.
 
@@ -109,32 +174,57 @@ afterwards.
 
 ```bash
 git clone https://github.com/matthewlui/realistic-skills.git
-ln -s "$PWD/realistic-skills/skills/redline" ~/.claude/skills/redline
+ln -s "$PWD/realistic-skills/skills/review" ~/.claude/skills/review
 ```
 
 ### Use
 
 ```
-> redline this design doc before I read it properly
-> /redline docs/api-plan.md
+> review this design doc before I read it properly
+> /review docs/api-plan.md
 ```
 
 Then, once you have marked it up and hit submit:
 
 ```
-> collect the redline
+> collect the review
 ```
 
-### 🚧 Honest status
+If something comes back still broken, follow up on that comment rather than filing a
+new one — Claude reads the whole thread before answering again.
 
-Design is settled and a working prototype exists — it was used to review its own
-design spec, across two rounds, and the round trip held. Not installable yet:
+### Status
 
-- ✅ Selection anchoring, verdicts, suggested replacements, drafts, submit
-- ✅ Hosted runtime, proven end to end
-- ⬜ Local server and local transport
-- ⬜ Diff / changelist renderer
-- ⬜ `SKILL.md`, tests, packaging
+Built by reviewing itself. The design spec was reviewed through the tool, then the
+tool was reviewed through the tool, then the summary of that work was reviewed through
+the tool — which is where most of what follows came from.
+
+- ✅ Markdown, authored HTML and unified diff as input
+- ✅ Selection anchoring, five verdicts, suggested replacements, drafts, submit
+- ✅ Local server and local transport — no reload, nothing leaves the machine
+- ✅ Hosted runtime and review extraction
+- ✅ Diff renderer with content-hash line anchors; inline diffs with token marking
+- ✅ Comment threads, follow-up and reopen
+- ✅ Syntax highlighting, zero dependencies
+- ✅ `SKILL.md` and 171 tests
+- ⬜ Not yet exercised as an installed skill in a fresh session
+
+Five bugs the test suite could not have found on its own. Two were reported by a human
+looking at the page; three surfaced while building the tests around it. All five now
+have tests that fail without the fix.
+
+| Found by | Bug |
+|:--|:--|
+| Reviewing the page | The notice banner filled the viewport — `#rv-app` declared two grid rows for three children, which also broke the document pane's scroll containment |
+| Reviewing the page | Uppercase-styled headings could not be selected at all. `Selection.toString()` returns *rendered* text, so `BACKOFF` never matched source `Backoff` |
+| Writing a round-trip test | Terminator escaping wasn't injective, so any reviewed source using the `'<\/script>'` idiom came back corrupted |
+| Writing a stale-counter test | A reset id counter could mint duplicate block ids, making every anchor on them ambiguous |
+| Writing a republish test | Re-escaping page text deepened the escape each round, so the engine's own source would change meaning after enough republishes |
+
+The escaping one is the instructive one: a test asserting escaping *"leaves
+already-escaped text alone"* had been written first, which encoded the bug **as a
+requirement**. It passed. Only a round-trip test made the two assertions contradict
+each other. A green suite is evidence about the tests, not the code.
 
 ---
 
